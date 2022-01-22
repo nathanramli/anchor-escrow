@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, SetAuthority, TokenAccount};
+use anchor_spl::token::{self, CloseAccount, SetAuthority, Token, TokenAccount, Transfer};
 use spl_token::instruction::AuthorityType;
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
@@ -43,6 +43,28 @@ pub mod solana_escrow_anchor {
 
         Ok(())
     }
+
+    pub fn cancel(ctx: Context<Cancel>) -> ProgramResult {
+        let (_pda, bump_seed) = Pubkey::find_program_address(&[ESCROW_PDA_SEEDS], ctx.program_id);
+        let seeds = &[&ESCROW_PDA_SEEDS[..], &[bump_seed]];
+
+        token::transfer(
+            ctx.accounts
+                .into_transfer_context()
+                .with_signer(&[&seeds[..]]),
+            ctx.accounts.escrow_account.initializer_amount,
+        )?;
+
+        token::close_account(
+            ctx.accounts
+                .close_account_context()
+                .with_signer(&[&seeds[..]]),
+        )?;
+
+        token::close_account(ctx.accounts.close_receiver_account_context())?;
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -58,8 +80,30 @@ pub struct Initialize<'info> {
     )]
     pub initializer_deposit_token_account: Account<'info, TokenAccount>,
     pub initializer_receive_token_account: Account<'info, TokenAccount>,
-    pub system_program: AccountInfo<'info>,
-    pub token_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct Cancel<'info> {
+    #[account(signer, mut)]
+    pub initializer: AccountInfo<'info>,
+    #[account(
+        mut,
+        constraint = escrow_account.initializer_key == initializer.key(),
+        constraint = escrow_account.initializer_deposit_token_account == initializer_deposit_token_account.key(),
+        constraint = escrow_account.initializer_receive_token_account == initializer_receive_token_account.key(),
+        close = initializer
+    )]
+    pub escrow_account: Account<'info, EscrowAccount>,
+    #[account(mut)]
+    pub initializer_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub initializer_deposit_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub initializer_receive_token_account: Account<'info, TokenAccount>,
+    pub pda: AccountInfo<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[account]
@@ -84,6 +128,46 @@ impl<'info> Initialize<'info> {
                 .to_account_info()
                 .clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+}
+
+impl<'info> Cancel<'info> {
+    pub fn into_transfer_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
+        let cpi_accounts = Transfer {
+            authority: self.pda.clone(),
+            from: self
+                .initializer_deposit_token_account
+                .to_account_info()
+                .clone(),
+            to: self.initializer_token_account.to_account_info().clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+
+    pub fn close_account_context(&self) -> CpiContext<'_, '_, '_, 'info, CloseAccount<'info>> {
+        let cpi_accounts = CloseAccount {
+            account: self
+                .initializer_deposit_token_account
+                .to_account_info()
+                .clone(),
+            authority: self.pda.clone(),
+            destination: self.initializer.clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+
+    pub fn close_receiver_account_context(
+        &self,
+    ) -> CpiContext<'_, '_, '_, 'info, CloseAccount<'info>> {
+        let cpi_accounts = CloseAccount {
+            account: self
+                .initializer_receive_token_account
+                .to_account_info()
+                .clone(),
+            authority: self.initializer.clone(),
+            destination: self.initializer.clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 }

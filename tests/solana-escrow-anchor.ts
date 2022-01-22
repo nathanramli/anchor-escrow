@@ -20,7 +20,9 @@ describe('solana-escrow-anchor', () => {
 
   const minter = Keypair.generate()
 
-  const escrow_account = Keypair.generate()
+  const escrowAccount = Keypair.generate()
+
+  let pda: PublicKey = null;
 
   let mintA: Token = null;
   let mintB: Token = null;
@@ -100,24 +102,25 @@ describe('solana-escrow-anchor', () => {
       {
         accounts: {
           initializer: alice.publicKey,
-          escrowAccount: escrow_account.publicKey,
+          escrowAccount: escrowAccount.publicKey,
           initializerDepositTokenAccount: depositTokenAccount,
           initializerReceiveTokenAccount: receiverTokenAccount,
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
         },
-        signers: [escrow_account, alice]
+        signers: [escrowAccount, alice]
       })
 
-    const [pda, _bump] = await PublicKey.findProgramAddress(
+    const [pdaTemp, _bump] = await PublicKey.findProgramAddress(
       [Buffer.from(encode(ESCROW_SEEDS))],
       program.programId
     )
+    pda = pdaTemp
 
     const depositInfo = await mintA.getAccountInfo(depositTokenAccount)
     assert.ok(depositInfo.owner.equals(pda))
 
-    const escrowData = await program.account.escrowAccount.fetch(escrow_account.publicKey)
+    const escrowData = await program.account.escrowAccount.fetch(escrowAccount.publicKey)
     assert.ok(escrowData.initializerAmount.toNumber() === OFFERED_AMOUNT_A)
     // Use .equals for comparing public key
     assert.ok(escrowData.initializerDepositTokenAccount.equals(depositTokenAccount))
@@ -125,4 +128,23 @@ describe('solana-escrow-anchor', () => {
     assert.ok(escrowData.takerAmount.toNumber() === REQUESTED_AMOUNT_B)
     assert.ok(escrowData.initializerKey.equals(alice.publicKey))
   });
+
+  it('Cancel', async () => {
+
+    const sign = await program.rpc.cancel({
+      accounts: {
+        initializer: alice.publicKey,
+        escrowAccount: escrowAccount.publicKey,
+        initializerTokenAccount: aliceTokenAccountA,
+        initializerDepositTokenAccount: depositTokenAccount,
+        initializerReceiveTokenAccount: receiverTokenAccount,
+        pda: pda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      },
+      signers: [alice]
+    })
+
+    const escrowAccountInfo = await provider.connection.getAccountInfo(escrowAccount.publicKey);
+    assert.ok(escrowAccountInfo === null)
+  })
 });

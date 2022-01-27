@@ -18,9 +18,9 @@ pub mod solana_escrow_anchor {
         ctx.accounts.escrow_account.initializer_key = *ctx.accounts.initializer.key;
         ctx.accounts
             .escrow_account
-            .initializer_deposit_token_account = *ctx
+            .vault_token_account = *ctx
             .accounts
-            .initializer_deposit_token_account
+            .vault_token_account
             .to_account_info()
             .key;
         ctx.accounts
@@ -95,9 +95,9 @@ pub struct Initialize<'info> {
     pub escrow_account: Account<'info, EscrowAccount>,
     #[account(
         mut,
-        constraint = initializer_deposit_token_account.amount >= initializer_amount
+        constraint = vault_token_account.amount == initializer_amount
     )]
-    pub initializer_deposit_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Account<'info, TokenAccount>,
     pub initializer_receive_token_account: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
@@ -111,7 +111,7 @@ pub struct Exchange<'info> {
     pub initializer: AccountInfo<'info>,
     #[account(mut, 
         constraint = escrow_account.initializer_receive_token_account == initializer_receive_token_account.key(),
-        constraint = escrow_account.initializer_deposit_token_account == initializer_deposit_token_account.key(),
+        constraint = escrow_account.vault_token_account == vault_token_account.key(),
         constraint = escrow_account.initializer_key == initializer.key(),
         close = initializer
     )]
@@ -122,7 +122,7 @@ pub struct Exchange<'info> {
     #[account(mut, constraint = taker_send_token_account.amount >= escrow_account.taker_amount)]
     pub taker_send_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
-    pub initializer_deposit_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub initializer_receive_token_account: Account<'info, TokenAccount>,
     pub pda: AccountInfo<'info>,
@@ -136,7 +136,7 @@ pub struct Cancel<'info> {
     #[account(
         mut,
         constraint = escrow_account.initializer_key == initializer.key(),
-        constraint = escrow_account.initializer_deposit_token_account == initializer_deposit_token_account.key(),
+        constraint = escrow_account.vault_token_account == vault_token_account.key(),
         constraint = escrow_account.initializer_receive_token_account == initializer_receive_token_account.key(),
         close = initializer
     )]
@@ -144,7 +144,7 @@ pub struct Cancel<'info> {
     #[account(mut)]
     pub initializer_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
-    pub initializer_deposit_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub initializer_receive_token_account: Account<'info, TokenAccount>,
     pub pda: AccountInfo<'info>,
@@ -154,7 +154,7 @@ pub struct Cancel<'info> {
 #[account]
 pub struct EscrowAccount {
     pub initializer_key: Pubkey,
-    pub initializer_deposit_token_account: Pubkey,
+    pub vault_token_account: Pubkey,
     pub initializer_receive_token_account: Pubkey,
     pub initializer_amount: u64,
     pub taker_amount: u64,
@@ -169,7 +169,7 @@ impl<'info> Initialize<'info> {
         let cpi_accounts = SetAuthority {
             current_authority: self.initializer.clone(),
             account_or_mint: self
-                .initializer_deposit_token_account
+                .vault_token_account
                 .to_account_info()
                 .clone(),
         };
@@ -182,7 +182,7 @@ impl<'info> Cancel<'info> {
         let cpi_accounts = Transfer {
             authority: self.pda.clone(),
             from: self
-                .initializer_deposit_token_account
+                .vault_token_account
                 .to_account_info()
                 .clone(),
             to: self.initializer_token_account.to_account_info().clone(),
@@ -193,7 +193,7 @@ impl<'info> Cancel<'info> {
     pub fn close_account_context(&self) -> CpiContext<'_, '_, '_, 'info, CloseAccount<'info>> {
         let cpi_accounts = CloseAccount {
             account: self
-                .initializer_deposit_token_account
+                .vault_token_account
                 .to_account_info()
                 .clone(),
             authority: self.pda.clone(),
@@ -235,7 +235,7 @@ impl<'info> Exchange<'info> {
     pub fn into_transfer_to_taker_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
         let cpi_accounts = Transfer {
             from: self
-                .initializer_deposit_token_account
+                .vault_token_account
                 .to_account_info()
                 .clone(),
             to: self.taker_receive_token_account.to_account_info().clone(),

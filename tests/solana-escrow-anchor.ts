@@ -31,7 +31,7 @@ describe('solana-escrow-anchor', () => {
   let bobTokenAccountA: PublicKey = null;
   let bobTokenAccountB: PublicKey = null;
 
-  let depositTokenAccount: PublicKey = null;
+  let vaultTokenAccount: PublicKey = null;
 
   const INIT_AMOUNT_TOKEN_A = 50;
   const INIT_AMOUNT_TOKEN_B = 50;
@@ -40,13 +40,13 @@ describe('solana-escrow-anchor', () => {
   const REQUESTED_AMOUNT_B = 25;
 
   const initializeTransaction = async () => {
-    depositTokenAccount = await mintA.createAccount(alice.publicKey)
+    vaultTokenAccount = await mintA.createAccount(alice.publicKey)
     aliceTokenAccountB = await mintB.createAccount(alice.publicKey)
     bobTokenAccountA = await mintA.createAccount(bob.publicKey)
 
     await mintA.transfer(
       aliceTokenAccountA,
-      depositTokenAccount,
+      vaultTokenAccount,
       alice.publicKey,
       [alice],
       OFFERED_AMOUNT_A
@@ -59,7 +59,7 @@ describe('solana-escrow-anchor', () => {
         accounts: {
           initializer: alice.publicKey,
           escrowAccount: escrowAccount.publicKey,
-          initializerDepositTokenAccount: depositTokenAccount,
+          vaultTokenAccount: vaultTokenAccount,
           initializerReceiveTokenAccount: aliceTokenAccountB,
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -129,7 +129,7 @@ describe('solana-escrow-anchor', () => {
         initializer: alice.publicKey,
         escrowAccount: escrowAccount.publicKey,
         initializerTokenAccount: aliceTokenAccountA,
-        initializerDepositTokenAccount: depositTokenAccount,
+        vaultTokenAccount: vaultTokenAccount,
         initializerReceiveTokenAccount: aliceTokenAccountB,
         pda: pda,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -150,13 +150,13 @@ describe('solana-escrow-anchor', () => {
   it('Initalize escrow', async () => {
     const sign = await initializeTransaction()
 
-    const depositInfo = await mintA.getAccountInfo(depositTokenAccount)
-    assert.ok(depositInfo.owner.equals(pda))
+    const vaultInfo = await mintA.getAccountInfo(vaultTokenAccount)
+    assert.ok(vaultInfo.owner.equals(pda))
 
     const escrowData = await program.account.escrowAccount.fetch(escrowAccount.publicKey)
     assert.ok(escrowData.initializerAmount.toNumber() === OFFERED_AMOUNT_A)
     // Use .equals for comparing public key
-    assert.ok(escrowData.initializerDepositTokenAccount.equals(depositTokenAccount))
+    assert.ok(escrowData.vaultTokenAccount.equals(vaultTokenAccount))
     assert.ok(escrowData.initializerReceiveTokenAccount.equals(aliceTokenAccountB))
     assert.ok(escrowData.takerAmount.toNumber() === REQUESTED_AMOUNT_B)
     assert.ok(escrowData.initializerKey.equals(alice.publicKey))
@@ -170,7 +170,7 @@ describe('solana-escrow-anchor', () => {
         takerReceiveTokenAccount: bobTokenAccountA,
         takerSendTokenAccount: bobTokenAccountB,
         escrowAccount: escrowAccount.publicKey,
-        initializerDepositTokenAccount: depositTokenAccount,
+        vaultTokenAccount: vaultTokenAccount,
         initializerReceiveTokenAccount: aliceTokenAccountB,
         pda: pda,
         tokenProgram: TOKEN_PROGRAM_ID

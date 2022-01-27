@@ -26,17 +26,54 @@ describe('solana-escrow-anchor', () => {
 
   let mintA: Token = null;
   let mintB: Token = null;
-  let aliceTokenAccountA = null;
-  let bobTokenAccountB = null;
+  let aliceTokenAccountA: PublicKey = null;
+  let aliceTokenAccountB: PublicKey = null;
+  let bobTokenAccountA: PublicKey = null;
+  let bobTokenAccountB: PublicKey = null;
 
   let depositTokenAccount: PublicKey = null;
-  let receiverTokenAccount: PublicKey = null;
 
   const INIT_AMOUNT_TOKEN_A = 50;
   const INIT_AMOUNT_TOKEN_B = 50;
 
   const OFFERED_AMOUNT_A = 20;
   const REQUESTED_AMOUNT_B = 25;
+
+  const initializeTransaction = async () => {
+    depositTokenAccount = await mintA.createAccount(alice.publicKey)
+    aliceTokenAccountB = await mintB.createAccount(alice.publicKey)
+    bobTokenAccountA = await mintA.createAccount(bob.publicKey)
+
+    await mintA.transfer(
+      aliceTokenAccountA,
+      depositTokenAccount,
+      alice.publicKey,
+      [alice],
+      OFFERED_AMOUNT_A
+    )
+
+    const txHash = await program.rpc.initialize(
+      new BN(OFFERED_AMOUNT_A),
+      new BN(REQUESTED_AMOUNT_B),
+      {
+        accounts: {
+          initializer: alice.publicKey,
+          escrowAccount: escrowAccount.publicKey,
+          initializerDepositTokenAccount: depositTokenAccount,
+          initializerReceiveTokenAccount: aliceTokenAccountB,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        },
+        signers: [escrowAccount, alice]
+      })
+
+    const [pdaTemp, _bump] = await PublicKey.findProgramAddress(
+      [Buffer.from(encode(ESCROW_SEEDS))],
+      program.programId
+    )
+    pda = pdaTemp
+    return txHash
+  }
 
   it('Setup', async () => {
     await provider.connection.confirmTransaction(await provider.connection.requestAirdrop(minter.publicKey, 1e9));
@@ -84,52 +121,8 @@ describe('solana-escrow-anchor', () => {
     assert.ok(infoTokenBob.amount.toNumber() == INIT_AMOUNT_TOKEN_B)
   });
 
-  it('Initalize escrow', async () => {
-    depositTokenAccount = await mintA.createAccount(alice.publicKey)
-    receiverTokenAccount = await mintB.createAccount(alice.publicKey)
-
-    await mintA.transfer(
-      aliceTokenAccountA,
-      depositTokenAccount,
-      alice.publicKey,
-      [alice],
-      OFFERED_AMOUNT_A
-    )
-
-    const sign = await program.rpc.initialize(
-      new BN(OFFERED_AMOUNT_A),
-      new BN(REQUESTED_AMOUNT_B),
-      {
-        accounts: {
-          initializer: alice.publicKey,
-          escrowAccount: escrowAccount.publicKey,
-          initializerDepositTokenAccount: depositTokenAccount,
-          initializerReceiveTokenAccount: receiverTokenAccount,
-          systemProgram: SystemProgram.programId,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        },
-        signers: [escrowAccount, alice]
-      })
-
-    const [pdaTemp, _bump] = await PublicKey.findProgramAddress(
-      [Buffer.from(encode(ESCROW_SEEDS))],
-      program.programId
-    )
-    pda = pdaTemp
-
-    const depositInfo = await mintA.getAccountInfo(depositTokenAccount)
-    assert.ok(depositInfo.owner.equals(pda))
-
-    const escrowData = await program.account.escrowAccount.fetch(escrowAccount.publicKey)
-    assert.ok(escrowData.initializerAmount.toNumber() === OFFERED_AMOUNT_A)
-    // Use .equals for comparing public key
-    assert.ok(escrowData.initializerDepositTokenAccount.equals(depositTokenAccount))
-    assert.ok(escrowData.initializerReceiveTokenAccount.equals(receiverTokenAccount))
-    assert.ok(escrowData.takerAmount.toNumber() === REQUESTED_AMOUNT_B)
-    assert.ok(escrowData.initializerKey.equals(alice.publicKey))
-  });
-
-  it('Cancel', async () => {
+  it('Init and Cancel', async () => {
+    const init = await initializeTransaction()
 
     const sign = await program.rpc.cancel({
       accounts: {
@@ -137,7 +130,7 @@ describe('solana-escrow-anchor', () => {
         escrowAccount: escrowAccount.publicKey,
         initializerTokenAccount: aliceTokenAccountA,
         initializerDepositTokenAccount: depositTokenAccount,
-        initializerReceiveTokenAccount: receiverTokenAccount,
+        initializerReceiveTokenAccount: aliceTokenAccountB,
         pda: pda,
         tokenProgram: TOKEN_PROGRAM_ID,
       },
@@ -146,5 +139,55 @@ describe('solana-escrow-anchor', () => {
 
     const escrowAccountInfo = await provider.connection.getAccountInfo(escrowAccount.publicKey);
     assert.ok(escrowAccountInfo === null)
+
+    const infoTokenAlice = await mintA.getAccountInfo(aliceTokenAccountA)
+    assert.ok(infoTokenAlice.amount.toNumber() == INIT_AMOUNT_TOKEN_A)
+
+    const infoTokenBob = await mintB.getAccountInfo(bobTokenAccountB)
+    assert.ok(infoTokenBob.amount.toNumber() == INIT_AMOUNT_TOKEN_B)
   })
+
+  it('Initalize escrow', async () => {
+    const sign = await initializeTransaction()
+
+    const depositInfo = await mintA.getAccountInfo(depositTokenAccount)
+    assert.ok(depositInfo.owner.equals(pda))
+
+    const escrowData = await program.account.escrowAccount.fetch(escrowAccount.publicKey)
+    assert.ok(escrowData.initializerAmount.toNumber() === OFFERED_AMOUNT_A)
+    // Use .equals for comparing public key
+    assert.ok(escrowData.initializerDepositTokenAccount.equals(depositTokenAccount))
+    assert.ok(escrowData.initializerReceiveTokenAccount.equals(aliceTokenAccountB))
+    assert.ok(escrowData.takerAmount.toNumber() === REQUESTED_AMOUNT_B)
+    assert.ok(escrowData.initializerKey.equals(alice.publicKey))
+  });
+
+  it('Exchange', async () => {
+    const sign = await program.rpc.exchange({
+      accounts: {
+        taker: bob.publicKey,
+        initializer: alice.publicKey,
+        takerReceiveTokenAccount: bobTokenAccountA,
+        takerSendTokenAccount: bobTokenAccountB,
+        escrowAccount: escrowAccount.publicKey,
+        initializerDepositTokenAccount: depositTokenAccount,
+        initializerReceiveTokenAccount: aliceTokenAccountB,
+        pda: pda,
+        tokenProgram: TOKEN_PROGRAM_ID
+      },
+      signers: [bob]
+    })
+
+    const bobTokenAccountAInfo = await mintA.getAccountInfo(bobTokenAccountA)
+    assert.ok(bobTokenAccountAInfo.amount.toNumber() === OFFERED_AMOUNT_A)
+
+    const bobTokenAccountBInfo = await mintB.getAccountInfo(bobTokenAccountB)
+    assert.ok(bobTokenAccountBInfo.amount.toNumber() === INIT_AMOUNT_TOKEN_B - REQUESTED_AMOUNT_B)
+
+    const aliceTokenAccountAInfo = await mintA.getAccountInfo(aliceTokenAccountA)
+    assert.ok(aliceTokenAccountAInfo.amount.toNumber() === INIT_AMOUNT_TOKEN_A - OFFERED_AMOUNT_A)
+
+    const aliceTokenAccountBInfo = await mintB.getAccountInfo(aliceTokenAccountB)
+    assert.ok(aliceTokenAccountBInfo.amount.toNumber() === REQUESTED_AMOUNT_B)
+  });
 });

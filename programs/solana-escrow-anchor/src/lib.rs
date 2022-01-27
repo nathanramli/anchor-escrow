@@ -44,6 +44,25 @@ pub mod solana_escrow_anchor {
         Ok(())
     }
 
+    pub fn exchange(ctx: Context<Exchange>) -> ProgramResult {
+        let (_pda, bump_seed) = Pubkey::find_program_address(&[ESCROW_PDA_SEEDS], ctx.program_id);
+        let seeds = &[&ESCROW_PDA_SEEDS[..], &[bump_seed]];
+
+        token::transfer(
+            ctx.accounts.into_transfer_to_initializer_context(),
+            ctx.accounts.escrow_account.taker_amount,
+        )?;
+
+        token::transfer(
+            ctx.accounts
+                .into_transfer_to_taker_context()
+                .with_signer(&[&seeds[..]]),
+            ctx.accounts.escrow_account.initializer_amount,
+        )?;
+
+        Ok(())
+    }
+
     pub fn cancel(ctx: Context<Cancel>) -> ProgramResult {
         let (_pda, bump_seed) = Pubkey::find_program_address(&[ESCROW_PDA_SEEDS], ctx.program_id);
         let seeds = &[&ESCROW_PDA_SEEDS[..], &[bump_seed]];
@@ -81,6 +100,32 @@ pub struct Initialize<'info> {
     pub initializer_deposit_token_account: Account<'info, TokenAccount>,
     pub initializer_receive_token_account: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct Exchange<'info> {
+    #[account(signer)]
+    pub taker: AccountInfo<'info>,
+    #[account(mut)]
+    pub initializer: AccountInfo<'info>,
+    #[account(mut, 
+        constraint = escrow_account.initializer_receive_token_account == initializer_receive_token_account.key(),
+        constraint = escrow_account.initializer_deposit_token_account == initializer_deposit_token_account.key(),
+        constraint = escrow_account.initializer_key == initializer.key(),
+        close = initializer
+    )]
+    pub escrow_account: Account<'info, EscrowAccount>,
+    // we don't need to check the token account mint, because the transfer will fail if mint not equal
+    #[account(mut)]
+    pub taker_receive_token_account: Account<'info, TokenAccount>,
+    #[account(mut, constraint = taker_send_token_account.amount >= escrow_account.taker_amount)]
+    pub taker_send_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub initializer_deposit_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub initializer_receive_token_account: Account<'info, TokenAccount>,
+    pub pda: AccountInfo<'info>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -167,6 +212,34 @@ impl<'info> Cancel<'info> {
                 .clone(),
             authority: self.initializer.clone(),
             destination: self.initializer.clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+}
+
+impl<'info> Exchange<'info> {
+    pub fn into_transfer_to_initializer_context(
+        &self,
+    ) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
+        let cpi_accounts = Transfer {
+            from: self.taker_send_token_account.to_account_info().clone(),
+            to: self
+                .initializer_receive_token_account
+                .to_account_info()
+                .clone(),
+            authority: self.taker.clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+
+    pub fn into_transfer_to_taker_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
+        let cpi_accounts = Transfer {
+            from: self
+                .initializer_deposit_token_account
+                .to_account_info()
+                .clone(),
+            to: self.taker_receive_token_account.to_account_info().clone(),
+            authority: self.pda.clone(),
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }

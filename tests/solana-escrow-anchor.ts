@@ -1,5 +1,4 @@
 import * as anchor from '@project-serum/anchor';
-import { Program, BN } from '@project-serum/anchor';
 import { Token, TOKEN_PROGRAM_ID, } from '@solana/spl-token';
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { SolanaEscrowAnchor } from '../target/types/solana_escrow_anchor';
@@ -12,15 +11,15 @@ describe('solana-escrow-anchor', () => {
   anchor.setProvider(anchor.Provider.env());
   const provider = anchor.Provider.env();
 
-  const program = anchor.workspace.SolanaEscrowAnchor as Program<SolanaEscrowAnchor>;
-  const ESCROW_SEEDS = "escrow"
+  const program = anchor.workspace.SolanaEscrowAnchor as anchor.Program<SolanaEscrowAnchor>;
+  const VAULT_SEEDS = "vault"
 
   const alice = Keypair.generate()
   const bob = Keypair.generate()
 
   const minter = Keypair.generate()
 
-  const escrowAccount = Keypair.generate()
+  let getUserEscrow = (async (userPubkey: PublicKey) => PublicKey.findProgramAddress([userPubkey.toBuffer()], program.programId))
 
   let pda: PublicKey = null;
 
@@ -52,23 +51,25 @@ describe('solana-escrow-anchor', () => {
       OFFERED_AMOUNT_A
     )
 
+    const [pdaEscrow, _bumpEscrow] = await getUserEscrow(alice.publicKey)
+
     const txHash = await program.rpc.initialize(
-      new BN(OFFERED_AMOUNT_A),
-      new BN(REQUESTED_AMOUNT_B),
+      new anchor.BN(OFFERED_AMOUNT_A),
+      new anchor.BN(REQUESTED_AMOUNT_B),
       {
         accounts: {
           initializer: alice.publicKey,
-          escrowAccount: escrowAccount.publicKey,
+          escrowAccount: pdaEscrow,
           vaultTokenAccount: vaultTokenAccount,
           initializerReceiveTokenAccount: aliceTokenAccountB,
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
         },
-        signers: [escrowAccount, alice]
+        signers: [alice]
       })
 
     const [pdaTemp, _bump] = await PublicKey.findProgramAddress(
-      [Buffer.from(encode(ESCROW_SEEDS))],
+      [Buffer.from(encode(VAULT_SEEDS))],
       program.programId
     )
     pda = pdaTemp
@@ -124,10 +125,12 @@ describe('solana-escrow-anchor', () => {
   it('Init and Cancel', async () => {
     const init = await initializeTransaction()
 
+    const [pdaEscrow, _bumpEscrow] = await getUserEscrow(alice.publicKey)
+
     const sign = await program.rpc.cancel({
       accounts: {
         initializer: alice.publicKey,
-        escrowAccount: escrowAccount.publicKey,
+        escrowAccount: pdaEscrow,
         initializerTokenAccount: aliceTokenAccountA,
         vaultTokenAccount: vaultTokenAccount,
         initializerReceiveTokenAccount: aliceTokenAccountB,
@@ -137,7 +140,7 @@ describe('solana-escrow-anchor', () => {
       signers: [alice]
     })
 
-    const escrowAccountInfo = await provider.connection.getAccountInfo(escrowAccount.publicKey);
+    const escrowAccountInfo = await provider.connection.getAccountInfo(pdaEscrow);
     assert.ok(escrowAccountInfo === null)
 
     const infoTokenAlice = await mintA.getAccountInfo(aliceTokenAccountA)
@@ -153,7 +156,9 @@ describe('solana-escrow-anchor', () => {
     const vaultInfo = await mintA.getAccountInfo(vaultTokenAccount)
     assert.ok(vaultInfo.owner.equals(pda))
 
-    const escrowData = await program.account.escrowAccount.fetch(escrowAccount.publicKey)
+    const [pdaEscrow, _bumpEscrow] = await getUserEscrow(alice.publicKey)
+
+    const escrowData = await program.account.escrowAccount.fetch(pdaEscrow)
     assert.ok(escrowData.initializerAmount.toNumber() === OFFERED_AMOUNT_A)
     // Use .equals for comparing public key
     assert.ok(escrowData.vaultTokenAccount.equals(vaultTokenAccount))
@@ -163,13 +168,15 @@ describe('solana-escrow-anchor', () => {
   });
 
   it('Exchange', async () => {
+    const [pdaEscrow, _bumpEscrow] = await getUserEscrow(alice.publicKey)
+
     const sign = await program.rpc.exchange({
       accounts: {
         taker: bob.publicKey,
         initializer: alice.publicKey,
         takerReceiveTokenAccount: bobTokenAccountA,
         takerSendTokenAccount: bobTokenAccountB,
-        escrowAccount: escrowAccount.publicKey,
+        escrowAccount: pdaEscrow,
         vaultTokenAccount: vaultTokenAccount,
         initializerReceiveTokenAccount: aliceTokenAccountB,
         pda: pda,

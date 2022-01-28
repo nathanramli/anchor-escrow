@@ -8,7 +8,7 @@ declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 pub mod solana_escrow_anchor {
     use super::*;
 
-    const ESCROW_PDA_SEEDS: &[u8] = b"escrow";
+    const VAULT_PDA_SEEDS: &[u8] = b"vault";
 
     pub fn initialize(
         ctx: Context<Initialize>,
@@ -34,7 +34,7 @@ pub mod solana_escrow_anchor {
         ctx.accounts.escrow_account.initializer_amount = initializer_amount;
         ctx.accounts.escrow_account.taker_amount = taker_amount;
 
-        let (pda, _bump) = Pubkey::find_program_address(&[ESCROW_PDA_SEEDS], ctx.program_id);
+        let (pda, _bump) = Pubkey::find_program_address(&[VAULT_PDA_SEEDS], ctx.program_id);
         token::set_authority(
             ctx.accounts.into_set_authority_context(),
             AuthorityType::AccountOwner,
@@ -45,8 +45,8 @@ pub mod solana_escrow_anchor {
     }
 
     pub fn exchange(ctx: Context<Exchange>) -> ProgramResult {
-        let (_pda, bump_seed) = Pubkey::find_program_address(&[ESCROW_PDA_SEEDS], ctx.program_id);
-        let seeds = &[&ESCROW_PDA_SEEDS[..], &[bump_seed]];
+        let (_pda, bump_seed) = Pubkey::find_program_address(&[VAULT_PDA_SEEDS], ctx.program_id);
+        let seeds = &[&VAULT_PDA_SEEDS[..], &[bump_seed]];
 
         token::transfer(
             ctx.accounts.into_transfer_to_initializer_context(),
@@ -64,8 +64,8 @@ pub mod solana_escrow_anchor {
     }
 
     pub fn cancel(ctx: Context<Cancel>) -> ProgramResult {
-        let (_pda, bump_seed) = Pubkey::find_program_address(&[ESCROW_PDA_SEEDS], ctx.program_id);
-        let seeds = &[&ESCROW_PDA_SEEDS[..], &[bump_seed]];
+        let (_pda, bump_seed) = Pubkey::find_program_address(&[VAULT_PDA_SEEDS], ctx.program_id);
+        let seeds = &[&VAULT_PDA_SEEDS[..], &[bump_seed]];
 
         token::transfer(
             ctx.accounts
@@ -91,7 +91,7 @@ pub mod solana_escrow_anchor {
 pub struct Initialize<'info> {
     #[account(signer, mut)]
     pub initializer: AccountInfo<'info>,
-    #[account(init, payer = initializer, space = 8 + EscrowAccount::LEN)]
+    #[account(init, seeds = [initializer.key().as_ref()], bump, payer = initializer, space = 8 + EscrowAccount::LEN)]
     pub escrow_account: Account<'info, EscrowAccount>,
     #[account(
         mut,

@@ -13,13 +13,14 @@ describe('solana-escrow-anchor', () => {
 
   const program = anchor.workspace.SolanaEscrowAnchor as anchor.Program<SolanaEscrowAnchor>;
   const VAULT_SEEDS = "vault"
+  const ESCROW_SEEDS = "escrow"
 
   const alice = Keypair.generate()
   const bob = Keypair.generate()
 
   const minter = Keypair.generate()
 
-  let getUserEscrow = (async (userPubkey: PublicKey) => PublicKey.findProgramAddress([userPubkey.toBuffer()], program.programId))
+  let getUserEscrow = (async (userPubkey: PublicKey) => PublicKey.findProgramAddress([Buffer.from(encode(ESCROW_SEEDS)), userPubkey.toBuffer()], program.programId))
 
   let pda: PublicKey = null;
 

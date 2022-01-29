@@ -91,7 +91,7 @@ pub mod solana_escrow_anchor {
 pub struct Initialize<'info> {
     #[account(signer, mut)]
     pub initializer: AccountInfo<'info>,
-    #[account(init, seeds = [initializer.key().as_ref()], bump, payer = initializer, space = 8 + EscrowAccount::LEN)]
+    #[account(init, seeds = [b"escrow".as_ref(), initializer.key().as_ref()], bump, payer = initializer, space = 8 + EscrowAccount::LEN)]
     pub escrow_account: Account<'info, EscrowAccount>,
     #[account(
         mut,
